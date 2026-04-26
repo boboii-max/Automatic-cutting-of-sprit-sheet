@@ -1,17 +1,12 @@
 # 2D 精灵表格导出
 
-一个面向 `macOS` 的 2D 精灵抠图、切图和精灵表导出工具。
+一个面向 `macOS` 的 2D 精灵抠图、切图和精灵表导出工具。![EN](./docs/assets/EN.md)
 
 当前主流程是：导入图片，用类似 PS 魔棒的“边缘连通背景选择”算法把背景变透明，在透明结果上选择图案，然后按“切图导出”或“精灵表导出”两种模式输出 PNG。
 
 原图：
 
-![原图样例](./docs/assets/2026-04-26/source-sample.png)
-
-透明 PNG 结果：
-
-![抠图结果](./docs/assets/2026-04-26/cutout-result.png)
-## 本地开发
+![原图样例](./docs/assets/2026-04-26/spritSheetCutter_bfAft.jpg)
 
 ## 当前主流程
 
