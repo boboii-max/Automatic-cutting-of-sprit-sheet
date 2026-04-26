@@ -1,41 +1,96 @@
-# 2026-04-26 工作树更新记录
+# 2D Sprite Sheet Export
 
-本次工作树把应用从早期“多分组精灵表切分”收口为更清晰的 `2D 精灵表格导出`：以魔棒式抠图为核心，保留切图逐张导出，并恢复单组精灵表导出。
+A macOS-oriented tool for 2D sprite background removal, slicing, and sprite sheet export. 
 
-## 更新内容
+The current main workflow is: import an image, use a “edge-connected background selection” algorithm similar to Photoshop’s magic wand to make the background transparent, then select patterns on the transparent result and export either as “slice export” or “sprite sheet export” in PNG format.
 
-- 界面重构为三入口：`导入图片 / 切图导出 / 精灵表导出`。
-- 抠图核心改为边缘连通魔棒算法，支持容差、边缘柔化、边缘内缩。
-- 透明预览支持画布平移、滚轮缩放、回到中心，并用 canvas 保持像素预览清晰。
-- 切图选择支持编辑边界，可调整自动识别出来的图块裁切框。
-- 切图导出支持单张和多张；多张导出时输入基础文件名，自动生成 `_0 / _1 / _2` 后缀。
-- 精灵表导出改为单组参数：`32x32 / 64x64 / 自定义`、固定列数滑条、`像素 / 平滑` 采样。
-- Electron 保存接口改为可重命名的 macOS 保存窗口，并为批量导出增加覆盖确认。
-- README 已更新当前功能、参数说明、项目结构和开发命令。
+Original image:
 
-## 界面截图
+![Original sample](./assets/2026-04-26/spritSheetCutter_bfAft.jpg)
 
-![2D 精灵表格导出界面](./assets/2026-04-26/workbench-spritesheet-mode.png)
+## Current Main Workflow
 
-## 抠图对比
+- Import `PNG / JPG / WEBP`
+- Automatically sample background colors from the four edges of the image
+- Start flood fill from edge seeds, removing only background connected to the edges
+- Reduce alpha of semi-background edge pixels adjacent to the background to minimize white fringes
+- Optionally shrink the visible pattern’s outer contour inward by 0–4 pixels
+- Preview the original image and the transparent PNG result
+- Automatically detect separated patterns on the transparent result, with click and box selection support
+- Export selected patterns individually as transparent PNGs
+- Export selected patterns as a single sprite sheet using `32x32 / 64x64 / custom` grid cells
 
-原图：
+![2D Sprite Sheet Export Interface](./assets/2026-04-26/workbench-spritesheet-mode.png)
 
-![原图样例](./assets/2026-04-26/source-sample.png)
+## Parameter Description
 
-透明 PNG 结果：
+- `Tolerance`: Allowed color difference for the background. Lower for pure white backgrounds; higher for near-white or slightly compressed noisy backgrounds.
+- `Edge Softening`: Reduces alpha of semi-background pixels adjacent to the background to alleviate white fringes.
+- `Edge Inset`: Applies alpha erosion to foreground pixels next to transparent areas. Default is 1 pixel, suitable for trimming outer white edges; set to 0 if fine lines are lost.
+- `Edge Sampling Width`: Number of pixels sampled inward from the image edge to estimate the background.
+- `Background Color Count`: Maximum number of clustered background colors. Default is 3, suitable for slight color variations along edges.
+- `Sprite Cell Size`: Default `32x32`, can also choose `64x64` or custom dimensions.
+- `Fixed Column Count`: Default is 4 columns, rows are calculated automatically.
+- `Sampling Mode`: `Pixel` uses nearest neighbor; `Smooth` uses bicubic. Both preserve aspect ratio and center with transparent padding.
 
-![抠图结果](./assets/2026-04-26/cutout-result.png)
+## Suitable Assets
 
-## 验证记录
+Best suited for:
 
-- `npm test`：35 个核心测试通过。
-- `npm run build`：前端与 Electron TypeScript 构建通过。
-- `npm run package`：已生成 macOS `.app` 和 `.zip` 测试包。
+- Pixel assets with white or near-white backgrounds
+- Characters/objects with solid color backgrounds
+- Assets where the background is connected to the image edges
+- Pixel characters with black outlines, even if the interior contains white clothing or light-colored objects
 
-## 打包产物
+Not suitable for:
 
-- `.app`：`release/mac-arm64/2D 精灵表格导出.app`
-- `.zip`：`release/2D 精灵表格导出-0.1.0-arm64-mac.zip`
+- Complex photographic backgrounds
+- Images where the background is not connected to the edges
+- Assets requiring multiple manual sampling points
+- Illustrations requiring semantic AI background removal
 
-`release/`、`dist/`、`dist-electron/`、`node_modules/` 均为 `.gitignore` 忽略目录，不进入本地提交。
+## Local Development
+
+### Environment
+
+- Node.js 24+
+- npm 11+
+
+### Install Dependencies
+
+```bash
+npm install
+```
+
+### Start Development Mode
+
+```bash
+npm run dev
+```
+
+### Run Tests
+
+```bash
+npm test
+```
+
+### Build
+
+```bash
+npm run build
+```
+
+### Package macOS App
+
+```bash
+npm run package
+```
+
+The packaged output will appear in the `release/` directory. At this stage, signing, notarization, and DMG are not included by default.
+
+## Next Steps
+
+- Add new sprites to existing sprite sheets and modify sprite arrangement order
+- Add click sampling and add/remove selection
+- Add pixel-level comparison/zoom inspection for transparent results
+- Further refine semi-transparent edge strategies to reduce stubborn white fringes
