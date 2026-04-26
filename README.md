@@ -6,11 +6,11 @@
 
 原图：
 
-![原图样例](./assets/2026-04-26/source-sample.png)
+![原图样例](./docs/assets/2026-04-26/source-sample.png)
 
 透明 PNG 结果：
 
-![抠图结果](./assets/2026-04-26/cutout-result.png)
+![抠图结果](./docs/assets/2026-04-26/cutout-result.png)
 ## 本地开发
 
 ## 当前主流程
@@ -25,7 +25,7 @@
 - 将选中的图案逐个导出为独立透明 PNG
 - 将选中的图案按 `32x32 / 64x64 / 自定义` 单元格导出为单张精灵表
 
-![2D 精灵表格导出界面](./assets/2026-04-26/workbench-spritesheet-mode.png)
+![2D 精灵表格导出界面](./docs/assets/2026-04-26/workbench-spritesheet-mode.png)
 
 ## 参数说明
 
