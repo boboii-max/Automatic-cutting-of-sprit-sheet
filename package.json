@@ -2,7 +2,7 @@
   "name": "ai-pixel-image-cuter",
   "version": "0.1.0",
   "private": true,
-  "description": "Mac sprite sheet cutter and rearranger for pixel art.",
+  "description": "Mac 2D sprite cutout and spritesheet export tool.",
   "main": "dist-electron/main/index.js",
   "author": "OpenAI Codex",
   "license": "MIT",
@@ -17,7 +17,7 @@
   },
   "build": {
     "appId": "com.openai.pixelcutter",
-    "productName": "Pixel Sprite Cuter",
+    "productName": "2D 精灵表格导出",
     "directories": {
       "output": "release"
     },

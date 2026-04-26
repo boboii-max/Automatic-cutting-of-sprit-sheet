@@ -12,7 +12,10 @@ import {
   resampleSpriteToGroup,
   validateSpritesForGroup
 } from "../src/core/export";
-import type { PixelImageData, SpriteGroup } from "../src/core/types";
+import { calculateVisibleArea, cropImageByRect, extractCutoutSprites, isRectFullyContained } from "../src/core/cutoutSprites";
+import { buildCutoutSpritesheet, resampleCutoutToCell } from "../src/core/cutoutSpritesheet";
+import { applyMagicWandCutout } from "../src/core/magicWand";
+import type { CutoutSprite, PixelImageData, SpriteGroup } from "../src/core/types";
 
 function makeBlankImage(width: number, height: number, color = [255, 255, 255, 255]): PixelImageData {
   const data = new Uint8ClampedArray(width * height * 4);
@@ -70,6 +73,289 @@ function countNearBackgroundVisiblePixels(
   }
   return count;
 }
+
+function alphaAt(image: PixelImageData, x: number, y: number): number {
+  return image.data[(y * image.width + x) * 4 + 3];
+}
+
+describe("magic wand cutout", () => {
+  it("removes edge-connected white background while keeping an outlined light subject", () => {
+    const image = makeBlankImage(10, 10, [255, 255, 255, 255]);
+    paintRect(image, 2, 2, 6, 6, [18, 18, 18, 255]);
+    paintRect(image, 3, 3, 4, 4, [248, 244, 232, 255]);
+
+    const result = applyMagicWandCutout(image, {
+      tolerance: 12,
+      edgeSoftness: 0,
+      edgeShrinkPixels: 0,
+      sampleEdgeThickness: 1,
+      maxBackgroundClusters: 1
+    });
+
+    expect(result.image.width).toBe(10);
+    expect(result.image.height).toBe(10);
+    expect(alphaAt(result.image, 0, 0)).toBe(0);
+    expect(alphaAt(result.image, 2, 2)).toBe(255);
+    expect(alphaAt(result.image, 4, 4)).toBe(255);
+  });
+
+  it("does not delete internal background-colored islands that are not connected to the image edge", () => {
+    const image = makeBlankImage(12, 12, [255, 255, 255, 255]);
+    paintRect(image, 3, 3, 6, 6, [20, 20, 20, 255]);
+    paintRect(image, 5, 5, 2, 2, [255, 255, 255, 255]);
+
+    const result = applyMagicWandCutout(image, {
+      tolerance: 16,
+      edgeSoftness: 0,
+      edgeShrinkPixels: 0,
+      sampleEdgeThickness: 1,
+      maxBackgroundClusters: 1
+    });
+
+    expect(alphaAt(result.image, 0, 0)).toBe(0);
+    expect(alphaAt(result.image, 5, 5)).toBe(255);
+  });
+
+  it("supports near-white backgrounds through tolerance", () => {
+    const image = makeBlankImage(8, 8, [246, 247, 244, 255]);
+    paintRect(image, 3, 3, 2, 2, [30, 30, 30, 255]);
+
+    const result = applyMagicWandCutout(image, {
+      tolerance: 18,
+      edgeSoftness: 0,
+      edgeShrinkPixels: 0,
+      sampleEdgeThickness: 1,
+      maxBackgroundClusters: 1
+    });
+
+    expect(alphaAt(result.image, 0, 0)).toBe(0);
+    expect(alphaAt(result.image, 3, 3)).toBe(255);
+  });
+
+  it("softens edge matte pixels without changing the canvas size", () => {
+    const image = makeBlankImage(7, 5, [255, 255, 255, 255]);
+    paintRect(image, 3, 1, 2, 3, [25, 25, 25, 255]);
+    paintRect(image, 2, 2, 1, 1, [235, 235, 235, 255]);
+
+    const result = applyMagicWandCutout(image, {
+      tolerance: 10,
+      edgeSoftness: 60,
+      edgeShrinkPixels: 0,
+      sampleEdgeThickness: 1,
+      maxBackgroundClusters: 1
+    });
+
+    expect(result.image.width).toBe(7);
+    expect(result.image.height).toBe(5);
+    expect(alphaAt(result.image, 2, 2)).toBeGreaterThan(0);
+    expect(alphaAt(result.image, 2, 2)).toBeLessThan(255);
+    expect(result.softenedPixelCount).toBeGreaterThan(0);
+  });
+
+  it("shrinks visible alpha edges by one pixel when edge shrink is enabled", () => {
+    const image = makeBlankImage(10, 10, [255, 255, 255, 255]);
+    paintRect(image, 2, 2, 6, 6, [20, 20, 20, 255]);
+    paintRect(image, 3, 3, 4, 4, [180, 120, 80, 255]);
+
+    const result = applyMagicWandCutout(image, {
+      tolerance: 12,
+      edgeSoftness: 0,
+      edgeShrinkPixels: 1,
+      sampleEdgeThickness: 1,
+      maxBackgroundClusters: 1
+    });
+
+    expect(alphaAt(result.image, 2, 2)).toBe(0);
+    expect(alphaAt(result.image, 7, 7)).toBe(0);
+    expect(alphaAt(result.image, 3, 3)).toBe(255);
+    expect(result.erodedPixelCount).toBe(20);
+  });
+
+  it("softens the new edge after visible alpha edges are shrunk", () => {
+    const image = makeBlankImage(8, 5, [255, 255, 255, 255]);
+    paintRect(image, 2, 1, 1, 3, [230, 230, 230, 255]);
+    paintRect(image, 3, 1, 1, 3, [235, 235, 235, 255]);
+    paintRect(image, 4, 1, 2, 3, [25, 25, 25, 255]);
+
+    const result = applyMagicWandCutout(image, {
+      tolerance: 10,
+      edgeSoftness: 60,
+      edgeShrinkPixels: 1,
+      sampleEdgeThickness: 1,
+      maxBackgroundClusters: 1
+    });
+
+    expect(alphaAt(result.image, 2, 2)).toBe(0);
+    expect(alphaAt(result.image, 3, 2)).toBeGreaterThan(0);
+    expect(alphaAt(result.image, 3, 2)).toBeLessThan(255);
+    expect(result.softenedPixelCount).toBeGreaterThan(0);
+  });
+});
+
+describe("cutout sprite extraction", () => {
+  it("extracts separate visible alpha regions into individual cropped PNG images", () => {
+    const image = makeBlankImage(14, 8, [0, 0, 0, 0]);
+    paintRect(image, 1, 1, 3, 4, [255, 0, 0, 255]);
+    paintRect(image, 9, 2, 4, 3, [0, 120, 255, 255]);
+    paintRect(image, 6, 0, 1, 1, [255, 255, 255, 255]);
+
+    const sprites = extractCutoutSprites(image, {
+      alphaThreshold: 8,
+      minArea: 3,
+      minWidth: 2,
+      minHeight: 2
+    });
+
+    expect(sprites).toHaveLength(2);
+    expect(sprites[0].bounds).toEqual({ x: 1, y: 1, width: 3, height: 4 });
+    expect(sprites[1].bounds).toEqual({ x: 9, y: 2, width: 4, height: 3 });
+    expect(sprites[0].croppedImage.width).toBe(3);
+    expect(sprites[1].croppedImage.height).toBe(3);
+  });
+
+  it("keeps transparent pixels inside a component bounding box transparent", () => {
+    const image = makeBlankImage(8, 8, [0, 0, 0, 0]);
+    paintRect(image, 2, 2, 4, 1, [20, 20, 20, 255]);
+    paintRect(image, 2, 5, 4, 1, [20, 20, 20, 255]);
+    paintRect(image, 2, 2, 1, 4, [20, 20, 20, 255]);
+    paintRect(image, 5, 2, 1, 4, [20, 20, 20, 255]);
+
+    const [sprite] = extractCutoutSprites(image, {
+      alphaThreshold: 8,
+      minArea: 3,
+      minWidth: 2,
+      minHeight: 2
+    });
+
+    expect(sprite.croppedImage.width).toBe(4);
+    expect(sprite.croppedImage.height).toBe(4);
+    expect(alphaAt(sprite.croppedImage, 1, 1)).toBe(0);
+    expect(alphaAt(sprite.croppedImage, 0, 0)).toBe(255);
+  });
+
+  it("crops any edited rectangle from the full transparent image", () => {
+    const image = makeBlankImage(8, 7, [0, 0, 0, 0]);
+    paintRect(image, 1, 1, 2, 2, [255, 0, 0, 255]);
+    paintRect(image, 5, 3, 1, 2, [0, 255, 0, 255]);
+
+    const cropped = cropImageByRect(image, { x: 1, y: 1, width: 5, height: 4 });
+
+    expect(cropped.width).toBe(5);
+    expect(cropped.height).toBe(4);
+    expect(alphaAt(cropped, 0, 0)).toBe(255);
+    expect(alphaAt(cropped, 4, 2)).toBe(255);
+    expect(alphaAt(cropped, 3, 0)).toBe(0);
+  });
+
+  it("counts visible pixels and detects fully contained cutouts for manual merge", () => {
+    const image = makeBlankImage(10, 10, [0, 0, 0, 0]);
+    paintRect(image, 2, 2, 2, 2, [255, 0, 0, 255]);
+    paintRect(image, 6, 4, 1, 3, [0, 255, 0, 255]);
+
+    expect(calculateVisibleArea(image, { x: 1, y: 1, width: 7, height: 7 })).toBe(7);
+    expect(isRectFullyContained({ x: 6, y: 4, width: 1, height: 3 }, { x: 1, y: 1, width: 7, height: 7 })).toBe(
+      true
+    );
+    expect(isRectFullyContained({ x: 8, y: 4, width: 2, height: 2 }, { x: 1, y: 1, width: 7, height: 7 })).toBe(
+      false
+    );
+  });
+});
+
+function makeCutoutSprite(id: string, image: PixelImageData, order: number): CutoutSprite {
+  return {
+    id,
+    bounds: { x: 0, y: 0, width: image.width, height: image.height },
+    width: image.width,
+    height: image.height,
+    area: image.width * image.height,
+    order,
+    croppedImage: image
+  };
+}
+
+describe("cutout spritesheet export", () => {
+  it("exports three selected cutouts into one default 32px row with four columns", () => {
+    const sprites = [0, 1, 2].map((index) => {
+      const image = makeBlankImage(8, 8, [0, 0, 0, 0]);
+      paintRect(image, 0, 0, 8, 8, [20 + index, 20, 20, 255]);
+      return makeCutoutSprite(`cut-${index}`, image, index);
+    });
+
+    const result = buildCutoutSpritesheet(sprites, {
+      cellWidth: 32,
+      cellHeight: 32,
+      columns: 4,
+      resampleMode: "pixel"
+    });
+
+    expect(result.image.width).toBe(128);
+    expect(result.image.height).toBe(32);
+    expect(result.rows).toBe(1);
+    expect(result.columns).toBe(4);
+  });
+
+  it("uses additional rows when selected cutouts exceed the fixed column count", () => {
+    const sprites = [0, 1, 2, 3, 4].map((index) => {
+      const image = makeBlankImage(4, 4, [0, 0, 0, 0]);
+      paintRect(image, 0, 0, 4, 4, [40, 40 + index, 40, 255]);
+      return makeCutoutSprite(`cut-${index}`, image, index);
+    });
+
+    const result = buildCutoutSpritesheet(sprites, {
+      cellWidth: 32,
+      cellHeight: 32,
+      columns: 4,
+      resampleMode: "pixel"
+    });
+
+    expect(result.image.width).toBe(128);
+    expect(result.image.height).toBe(64);
+    expect(result.rows).toBe(2);
+  });
+
+  it("contains wide cutouts proportionally and centers them in transparent cells", () => {
+    const image = makeBlankImage(20, 10, [0, 0, 0, 0]);
+    paintRect(image, 0, 0, 20, 10, [200, 100, 20, 255]);
+
+    const resampled = resampleCutoutToCell(image, {
+      cellWidth: 32,
+      cellHeight: 32,
+      columns: 4,
+      resampleMode: "pixel"
+    });
+
+    expect(resampled.width).toBe(32);
+    expect(resampled.height).toBe(16);
+    expect(resampled.offsetX).toBe(0);
+    expect(resampled.offsetY).toBe(8);
+  });
+
+  it("keeps hard edges in pixel mode and blends edges in smooth mode", () => {
+    const image = makeBlankImage(2, 2, [0, 0, 0, 0]);
+    paintRect(image, 0, 0, 1, 2, [0, 0, 0, 255]);
+    paintRect(image, 1, 0, 1, 2, [255, 255, 255, 255]);
+
+    const pixel = resampleCutoutToCell(image, {
+      cellWidth: 5,
+      cellHeight: 5,
+      columns: 1,
+      resampleMode: "pixel"
+    }).image;
+    const smooth = resampleCutoutToCell(image, {
+      cellWidth: 5,
+      cellHeight: 5,
+      columns: 1,
+      resampleMode: "smooth"
+    }).image;
+
+    const pixelCenter = pixel.data[(2 * pixel.width + 2) * 4];
+    const smoothCenter = smooth.data[(2 * smooth.width + 2) * 4];
+    expect([0, 255]).toContain(pixelCenter);
+    expect(smoothCenter).toBeGreaterThan(0);
+    expect(smoothCenter).toBeLessThan(255);
+  });
+});
 
 describe("sprite detection", () => {
   it("estimates the dominant edge color", () => {
